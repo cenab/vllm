@@ -196,7 +196,10 @@ class OnlineRenderer:
 
         # Check if tool parsing is unavailable (common condition)
         tool_parsing_unavailable = (
-            tool_parser is None
+            (
+                tool_parser is None
+                or (request.tool_choice == "auto" and not self.enable_auto_tools)
+            )
             and not is_mistral_tokenizer(tokenizer)
             and not self.use_harmony
         )
@@ -279,6 +282,18 @@ class OnlineRenderer:
         skip_mm_cache: bool = False,
     ) -> ResponsesRenderResult | ErrorResponse:
         """Render a Responses request using only explicitly supplied history."""
+        if (
+            request.tools
+            and request.tool_choice == "auto"
+            and not self.enable_auto_tools
+            and not self.use_harmony
+            and not is_mistral_tokenizer(self.renderer.tokenizer)
+        ):
+            return self.create_error_response(
+                '"auto" tool choice requires '
+                "--enable-auto-tool-choice and --tool-call-parser to be set"
+            )
+
         template_error = self.validate_chat_template(
             request_chat_template=None,
             chat_template_kwargs=request.chat_template_kwargs,

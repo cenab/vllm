@@ -31,9 +31,10 @@ class ParserManager:
         from vllm.tool_parsers import ToolParserManager
 
         parser: type[ToolParser] | None = None
-        if not enable_auto_tools or tool_parser_name is None:
+        if tool_parser_name is None:
             return parser
-        logger.info_once('"auto" tool choice has been enabled.')
+        if enable_auto_tools:
+            logger.info_once('"auto" tool choice has been enabled.')
 
         try:
             if (
@@ -47,9 +48,7 @@ class ParserManager:
             parser = ToolParserManager.get_tool_parser(tool_parser_name)
         except Exception as e:
             raise TypeError(
-                "Error: --enable-auto-tool-choice requires "
-                f"tool_parser:'{tool_parser_name}' which has not "
-                "been registered"
+                f"Error: tool_parser:'{tool_parser_name}' has not been registered"
             ) from e
         return parser
 

@@ -9,6 +9,7 @@ import pytest
 from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.parser.abstract_parser import DelegatingParser
+from vllm.parser.parser_manager import ParserManager
 from vllm.parser.utils import count_history_tool_calls
 from vllm.reasoning.basic_parsers import BaseThinkingReasoningParser
 from vllm.tool_parsers.hermes_tool_parser import Hermes2ProToolParser
@@ -200,6 +201,47 @@ def test_parse_tool_only(tokenizer):
     assert len(tool_calls) == 1
     assert tool_calls[0].name == "get_weather"
     assert json.loads(tool_calls[0].arguments) == {"city": "Dallas"}
+
+
+@pytest.mark.parametrize("enable_auto_tools", [False, True])
+@pytest.mark.parametrize("json_format", [False, True])
+@pytest.mark.parametrize("choice", ["named", "required", "auto", "none"])
+def test_configured_tool_parser(
+    tokenizer, monkeypatch, enable_auto_tools, json_format, choice
+):
+    monkeypatch.setattr(
+        Hermes2ProToolParser, "supports_required_and_named", json_format
+    )
+    parser_cls = ParserManager.get_parser(
+        tool_parser_name="hermes", enable_auto_tools=enable_auto_tools
+    )
+    assert parser_cls is not None
+    parser = parser_cls(tokenizer)
+    request = make_request(
+        tools=TOOLS,
+        tool_choice={"type": "function", "function": {"name": "get_weather"}}
+        if choice == "named"
+        else choice,
+    )
+    model_output = TOOL_CALL_ONLY
+    if json_format and choice == "named":
+        model_output = TOOL_ARGUMENTS
+    elif json_format and choice == "required":
+        model_output = json.dumps(
+            [{"name": "get_weather", "parameters": {"city": "Dallas"}}]
+        )
+
+    _, content, tool_calls = parser.parse(
+        model_output, request, enable_auto_tools=enable_auto_tools
+    )
+    if choice in ("named", "required") or (choice == "auto" and enable_auto_tools):
+        assert tool_calls is not None and len(tool_calls) == 1
+        assert tool_calls[0].name == "get_weather"
+        assert json.loads(tool_calls[0].arguments) == {"city": "Dallas"}
+        assert not content
+    else:
+        assert not tool_calls
+        assert content == model_output
 
 
 def test_parse_named_tool_choice(tokenizer):

@@ -151,6 +151,50 @@ async def client(server):
         yield http_client
 
 
+@pytest.fixture(scope="module")
+def configured_tool_server():
+    with RemoteLaunchRenderServer(
+        MODEL_NAME, ["--tool-call-parser", "hermes"]
+    ) as remote_server:
+        yield remote_server
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("api", ["chat/completions", "responses"])
+@pytest.mark.parametrize("choice", ["named", "required", "auto", "none"])
+async def test_render_configured_tool_parser(configured_tool_server, api, choice):
+    function = {
+        "name": "get_weather",
+        "description": "Get the weather.",
+        "parameters": {"type": "object", "properties": {}},
+    }
+    body = {"model": MODEL_NAME, "tool_choice": choice}
+    if api == "responses":
+        body["input"] = "Get the weather."
+        body["tools"] = [{"type": "function", **function}]
+        if choice == "named":
+            body["tool_choice"] = {"type": "function", "name": "get_weather"}
+    else:
+        body["messages"] = [{"role": "user", "content": "Get the weather."}]
+        body["tools"] = [{"type": "function", "function": function}]
+        if choice == "named":
+            body["tool_choice"] = {
+                "type": "function",
+                "function": {"name": "get_weather"},
+            }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            configured_tool_server.url_for(f"v1/{api}/render"), json=body
+        )
+    if choice == "auto":
+        assert response.status_code == 400
+        assert "--enable-auto-tool-choice" in response.json()["error"]["message"]
+    else:
+        assert response.status_code == 200, response.text
+        if choice != "none":
+            assert response.json()["sampling_params"]["structured_outputs"]
+
+
 @pytest.mark.asyncio
 async def test_responses_render_basic(client):
     response = await client.post(
